@@ -1,0 +1,19 @@
+{
+  "name": "comment-extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build"
+  },
+  "dependencies": {
+    "plasmo": "^0.89",
+    "react": "^18.3",
+    "react-dom": "^18.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.6",
+    "@types/react": "^18.3",
+    "@types/node": "^22.0"
+  }
+}
