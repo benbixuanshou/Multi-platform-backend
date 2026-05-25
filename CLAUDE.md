@@ -110,7 +110,7 @@
 - 完整数据模型 + MySQL/Redis/Milvus 三层架构
 - 评论全生命周期状态机（含 verify 步骤和降级路径）
 - 三个平台的 PlatformAdapter 设计
-- 5 个 Agent 的 System Prompt
+- 5 个 Agent 的 System Prompt（ClassifyRouter / ReplyGenerate / ReplyCritic / InsightMining / ContentStrategy）
 - 10 个 Harness 模块深度设计（上下文管理 → 人机协作）
 - API Schema（27 个端点）
 - 技术选型（FastAPI / Next.js / MySQL / Redis / Milvus / 无 LangChain）

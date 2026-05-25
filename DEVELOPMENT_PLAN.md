@@ -179,17 +179,20 @@ PASS test_fallback_to_rules_on_llm_failure
 
 ---
 
-## Phase 4：ReplyGenerateAgent（预计 4-5 天）
+## Phase 4：ReplyGenerateAgent + ReplyCriticAgent（预计 5-6 天）
 
-**目标：** 生成 3 种风格草稿 + SafetyCheck 集成 + 人工质量评估。
+**目标：** 生成 3 种风格草稿 + Critic 评价 + Generator→Critic→Generator 协作循环 + SafetyCheck 集成 + 人工质量评估。
 
 ```
 待完成：
 □ ReplyGenerateAgent.build_prompt() — 含 creator 人设 + 帖子上下文 + 相似回复
 □ ReplyGenerateAgent.parse_response() — 3 drafts 解析
+□ ReplyCriticAgent.build_prompt() — 评价草稿质量
+□ ReplyCriticAgent.parse_response() — recommendation + regeneration_hint
+□ Generator → Critic → Generator 协作流程（needs_regeneration 时最多重生成 1 次）
 □ SafetyCheckHook 挂载到 Reply Agent 的 post_model
 □ 准备 eval set：50 条评论 + 人工评估回复质量（1-5 分）
-□ 人工评估：均值 ≥ 3.5/5（不达标调 Prompt，不进 Phase 5）
+□ 人工评估：均值 ≥ 3.5/5 + Critic 误判率（all_good 但实际有问题的比例 < 10%）
 □ risk_warning 触发率测试
 ```
 
@@ -217,6 +220,9 @@ PASS test_each_draft_has_style_and_content
 PASS test_safety_check_blocks_forbidden
 PASS test_prompt_injection_blocked
 PASS test_length_control
+PASS test_critic_all_good_detection
+PASS test_critic_needs_regeneration_trigger
+PASS test_generator_critic_loop_max_1_retry
 ```
 
 ---
@@ -333,6 +339,7 @@ Phase 8a — 多平台：
 
 Phase 8b — 差异化：
 □ InsightMiningAgent + /api/analytics/insights
+□ ContentStrategyAgent（消费 InsightMining 输出 → 行动建议）
 □ 批量操作完善（confidence 阈值保护）
 □ 回复效果追踪（reply_performance 定时任务）
 

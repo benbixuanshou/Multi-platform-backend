@@ -102,12 +102,16 @@
 10. 创建下游 task: type='reply' (或 insight/spam→结束)
 11. Worker 轮询 → ReplyGenerateAgent 取任务
 12. Reply: observe(post+comment+history+相似回复) → plan → act(LLM) → verify(SafetyCheck)
-13. INSERT reply_drafts (3 条)
-14. 前端轮询刷新 → 看到草稿
-15. 创作者选择/编辑/点发送
-16. POST /api/drafts/:id/send → 调 send_reply → 更新 sent_at
+13. ReplyCriticAgent 评价草稿 → all_good / needs_regeneration（↓ 回到 11）
+14. INSERT reply_drafts (3 条)
+15. 前端轮询刷新 → 看到草稿
+16. 创作者选择/编辑/点发送
+17. POST /api/drafts/:id/send → 调 send_reply → 更新 sent_at
 
-全过程状态可追溯：agent_tasks.payload.trace 记录每一步决策
+离线（每周）：
+  InsightMiningAgent 聚合分析 → ContentStrategyAgent 转化为行动建议 → 展示在 Dashboard
+
+全过程 trace 记录在 agent_tasks.payload.trace
 ```
 
 ## 组件职责总览
@@ -126,7 +130,9 @@
 | BaseAgent | agents/base.py | Agent 骨架（prompt+parse） | 以上全部 |
 | ClassifyRouterAgent | agents/classify_router.py | 分类+意图+路由 | BaseAgent+ToolRegistry |
 | ReplyGenerateAgent | agents/reply_generate.py | 3 风格回复草稿 | BaseAgent+ToolRegistry |
-| InsightMiningAgent | agents/insight_mining.py | 周报分析 | BaseAgent |
+| ReplyCriticAgent | agents/reply_critic.py | 评价草稿质量，触发重生成 | BaseAgent |
+| InsightMiningAgent | agents/insight_mining.py | 周报聚合分析 | BaseAgent |
+| ContentStrategyAgent | agents/content_strategy.py | 洞察→行动建议 | BaseAgent（消费InsightMining输出） |
 | XhsAdapter | adapters/xhs.py | 小红书抓取+发送 | PlatformAdapter |
 
 ## 数据库职责分配
