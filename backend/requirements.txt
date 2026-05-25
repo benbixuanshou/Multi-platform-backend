@@ -9,3 +9,4 @@ pydantic==2.10.*
 python-jose[cryptography]==3.3.*
 httpx==0.28.*
 openai==1.68.*
+FlagEmbedding==1.3.*

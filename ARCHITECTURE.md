@@ -120,7 +120,8 @@
 |---|---|---|---|
 | AgentRunner | harness/agent_runner.py | observe→plan→act→verify→output 模板 | HookPipeline |
 | HookPipeline | harness/hook_pipeline.py | 5 阶段 hook 管道 | hooks |
-| ModelProvider | harness/model_provider.py | 模型抽象，改配置切换 | — |
+| ModelProvider | harness/model_provider.py | LLM 抽象，改配置切换 | — |
+| EmbeddingProvider | harness/embedding_provider.py | Embedding 抽象，当前 bge-large-zh（本地免费） | — |
 | ContextBuilder | harness/context_builder.py | 三层上下文组装+预算+压缩 | ModelProvider(小模型) |
 | ToolRegistry | harness/tool_registry.py | 工具注册+执行+超时 | — |
 | CircuitBreaker | harness/circuit_breaker.py | 滑动窗口熔断 | Redis |

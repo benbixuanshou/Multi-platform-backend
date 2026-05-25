@@ -17,7 +17,7 @@ from pymilvus import (
 
 MILVUS_HOST = "localhost"
 MILVUS_PORT = 19530
-DIM = 1536
+DIM = 1024  # bge-large-zh outputs 1024-dimensional vectors
 
 
 def create_collections():

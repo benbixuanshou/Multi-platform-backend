@@ -84,7 +84,8 @@ open http://localhost:8000/docs                        # Swagger UI
 |---|---|
 | AgentRunner | observe→plan→act→verify→output 模板方法 |
 | HookPipeline | pre_model / post_model / on_error 五阶段 hook 注入 |
-| ModelProvider | 可替换模型抽象，改配置切模型 |
+| ModelProvider | 可替换 LLM 抽象，改配置切模型 |
+| EmbeddingProvider | 可替换 Embedding 抽象，当前 bge-large-zh（本地免费） |
 | ContextBuilder | 三层上下文组装 + 分级压缩 |
 | ToolRegistry | 工具注册 + 超时 + fallback |
 | CircuitBreaker | 滑动窗口熔断（Redis 计数） |
@@ -101,7 +102,7 @@ Agent 之间不直接调用，通过 `agent_tasks` 表解耦。ClassifyRouter �
 ## 关键设计决策
 
 - **不自动发送**：Agent 写到 reply_drafts，创作者手动确认发送。这是安全约束不是偏好设置
-- **ModelProvider 抽象**：Agent 不绑具体模型，改配置切模型。当前用 DeepSeek V4 Pro
+- **ModelProvider + EmbeddingProvider 抽象**：LLM 和 Embedding 都可替换。LLM 当前 DeepSeek V4 Pro，Embedding 当前 bge-large-zh（本地免费）
 - **Classify 用轻量模型、Reply 用强模型**：分开后可独立扩容、独立计费
 - **MVP 不做**：跨平台粉丝识别、SSE（用轮询）、Playwright 定时任务、自动发送、移动端 App
 - **SFT 后期做**：`is_adopted`/`is_edited` 自动积累训练数据，微调替代 API 调用降低成本

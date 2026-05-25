@@ -300,7 +300,7 @@ CREATE TABLE reply_performance (
 ```
 Fields:
   comment_id    VARCHAR(36)        PK，对应 MySQL comments.id
-  embedding     FLOAT_VECTOR(1536)
+  embedding     FLOAT_VECTOR(1024)
   platform      VARCHAR(32)        index
   post_id       VARCHAR(36)        index
   status        VARCHAR(32)        index  ← 只搜已回复的
@@ -317,7 +317,7 @@ Index: IVF_FLAT + COSINE (nlist=128)
 ```
 Fields:
   edit_log_id   VARCHAR(36)        PK，对应 MySQL reply_edit_log.id
-  embedding     FLOAT_VECTOR(1536)
+  embedding     FLOAT_VECTOR(1024)
   intent        VARCHAR(32)        index  ← 按意图过滤
   created_at    INT64              timestamp  ← 时间衰减加权
 
@@ -364,7 +364,7 @@ Index: IVF_FLAT + COSINE
      │
      ▼
 ⑤ STORE ─────── INSERT INTO comments，status = 'pending'
-     │             同时生成 embedding（调用 embedding API）
+     │             同时生成 embedding（调用本地 bge-large-zh，零成本）
      │
      ▼
 ⑥ ENQUEUE ───── INSERT INTO agent_tasks (task_type='classify', priority=0)
@@ -1059,15 +1059,15 @@ ALTER TABLE comments ADD COLUMN parent_comment_content TEXT;
 
 ### 5.8 pgvector 用于相似回复检索
 
-comments 表已有的 `content_embedding` 字段可用于检索与当前评论语义最相似的已回复评论，注入 Reply Agent 上下文：
+Milvus 的 `comment_embeddings` Collection 可用于检索与当前评论语义最相似的已回复评论，注入 Reply Agent 上下文：
 
 ```
-当前评论 → embedding API → 向量 → pgvector 余弦相似度搜索
-  WHERE post_id = :current_post_id AND status = 'replied'
-  ORDER BY content_embedding <=> :query_vector LIMIT 5
+当前评论 → EmbeddingProvider.embed() → 向量 → Milvus.search(
+    filter='status=="replied" && post_id=="..."', limit=5
+  ) → 拿 comment_id → MySQL 查原文
 ```
 
-不需要额外基础设施，pgvector 已在。
+EmbeddingProvider 当前使用 bge-large-zh（本地免费，中文最强，1024 维）。同一接口可切其他模型。
 
 ---
 
