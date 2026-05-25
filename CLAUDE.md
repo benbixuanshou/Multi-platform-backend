@@ -6,9 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 面向个人创作者的 AI-native 跨平台评论管理工具。覆盖小红书、抖音、B站。5 个 Agent 协作驱动（非规则引擎），Harness Engineering 自建框架（无 LangChain）。
 
+[README.md](README.md) — 项目介绍 + 快速开始
 [golden-seeking-lobster.md](golden-seeking-lobster.md) — 完整技术方案（十四章节，~2400 行）
 [ARCHITECTURE.md](ARCHITECTURE.md) — 系统架构全景图
 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — 8 Phase 开发计划（每 Phase 独立测试门）
+
+**当前状态：设计阶段完成，环境就绪，下一步 Phase 0 — `docker compose up -d`。**
 
 ## 技术栈
 
