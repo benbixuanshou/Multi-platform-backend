@@ -568,6 +568,280 @@ XHS 页面
 
 ## 四、Agent System Prompt 设计（核心 IP）
 
+### 4.0 Agent 范式：混合范式，不是单一模式
+
+5 个 Agent 不是统一的范式，而是根据任务特点选择不同模式：
+
+| Agent | 主范式 | 核心思想 |
+|---|---|---|
+| ClassifyRouterAgent | **Routing** | 分类 → 分发到不同处理路径（spam→跳过 / question→Reply / ugc→Insight） |
+| ReplyGenerateAgent | **ReAct + Reflection** | observe→plan→act→verify→output + Generator→Critic→Generator |
+| ReplyCriticAgent | **Reflection** | 评价 → 改进建议 → 触发重新生成 |
+| InsightMiningAgent | **Plan-and-Execute** | 规则引擎聚合（Plan）→ LLM 分析（Execute） |
+| ContentStrategyAgent | **ReAct** | 观察洞察报告 → 推理 → 生成行动建议 |
+
+**ReAct（我们所有 Agent 的基座）：**
+
+所有 Agent 的 `observe→plan→act→verify→output` 就是 ReAct 的增强版。和标准 ReAct 的区别在于我们加了 **verify 步骤** — 标准 ReAct 输出不对靠下一轮纠正，我们行动后先验证，不通过不输出：
+
+```
+ClassifyRouterAgent:
+  observe → 读评论+帖子+父评论
+  plan    → 信息够不够？是否调工具？
+  act     → LLM 分类
+  verify  → JSON 校验+category/intent 枚举检查+置信度阈值
+  output  → 三种路径（高置信度→创建下游/中→标记/低→pending_manual）
+```
+
+**Reflection（最体现工程深度的部分）：**
+
+ReplyGenerateAgent + ReplyCriticAgent 构成 Generator→Critic→Generator 循环。和标准 Reflection 的区别：Critic 不只有 LLM 评价，还有 SafetyCheckHook（硬规则检查）— LLM 可能漏掉禁止词，代码不会漏：
+
+```
+ReplyGenerateAgent（生成 3 条草稿）
+        │
+        ▼
+ReplyCriticAgent（评价草稿质量）
+   ├── all_good → 展示给创作者
+   └── needs_regeneration → 带修改建议回到 Generator（最多 1 次）
+```
+
+**Routing（编排层的关键决策）：**
+
+ClassifyRouterAgent 根据分类结果决定下游路径。Routing 本身不是完整 Agent 范式，但在多 Agent 系统里是关键的编排决策 — 什么任务交给谁、什么优先级、什么直接结束：
+
+```
+spam → 直接过滤，不创建下游任务，省钱
+complaint/high urgency → Reply Agent 优先级 100
+question → Reply Agent 优先级 50
+praise/low → Reply Agent 优先级 10
+ugc_gold → Insight Agent 攒着分析
+neutral → 跳过
+```
+
+**Plan-and-Execute（离线分析的两步拆分）：**
+
+InsightMiningAgent 的 Plan 阶段走规则引擎（零 LLM 成本），Execute 阶段才调 LLM：
+
+```
+InsightMiningAgent:
+  Plan（规则引擎）→ 分类统计+TF-IDF 关键词+Top 20 高互动评论
+  Execute（LLM）→ 基于聚合数据做深度分析
+
+ContentStrategyAgent:
+  Execute（LLM）→ 消费 InsightMining 输出 → 行动建议
+```
+
+### 4.0-2 多 Agent 编排：信息如何传递
+
+Agent 之间**不直接调用**，通过 `agent_tasks` 表解耦。编排分两条链路。
+
+**实时链路（Agent Tasks 驱动）：**
+
+```
+评论入库 → INSERT agent_tasks(type='classify')
+                │
+                ▼
+Worker 轮询 → ClassifyRouterAgent 取任务（FOR UPDATE SKIP LOCKED）
+                │
+                ├── spam/neutral → 不创建下游，结束
+                └── 需回复 → INSERT agent_tasks(type='reply', priority=N)
+                                    │
+                                    ▼
+                        Worker 轮询 → ReplyGenerateAgent 取任务
+                                        │ act 完成后写 checkpoint
+                                        ▼
+                                    写入 agent_tasks.result（3 条草稿）
+                                        │
+                                        ▼
+                                INSERT agent_tasks(type='reply_critic')
+                                        │
+                                        ▼
+                        Worker 轮询 → ReplyCriticAgent 取任务
+                                        │
+                                        ├── all_good → result={recommendation, evaluations}
+                                        └── needs_regeneration → 回到 ReplyGenerate（最多 1 次）
+```
+
+**信息传递的载体 — agent_tasks 的 payload/result：**
+
+| 从 → 到 | 传什么 | 放在哪里 |
+|---|---|---|
+| ClassifyRouter → ReplyGenerate | `{category, intent, intent_detail, sentiment, urgency, suggested_tone, key_points, confidence}` | `agent_tasks.payload`（Classify 的 result 成为 Reply 的 payload） |
+| ReplyGenerate → ReplyCritic | `{comment_content, creator_persona, drafts[{style, content}, ...], context_used}` | `agent_tasks.payload` |
+| ReplyCritic → ReplyGenerate（回退） | `{regeneration_hint, failed_dimensions[], original_drafts}` | `agent_tasks.payload` |
+| InsightMining → ContentStrategy | `{overall_sentiment, top_topics[], fan_concerns[], ugc_gold[], core_fans[], executive_summary}` | `agent_tasks.payload`（Insight 的 result 成为 Strategy 的 payload） |
+
+**具体数据流示例（Classify → Reply 的 payload 传递）：**
+
+```
+ClassifyRouterAgent 写入 agent_tasks.result:
+{
+  "category": "question",
+  "intent": "purchase_intent",
+  "intent_detail": "asking_for_link",
+  "sentiment": "neutral",
+  "urgency": "medium",
+  "needs_reply": true,
+  "suggested_tone": "professional",
+  "key_points": ["询问购买链接", "对产品有兴趣"],
+  "confidence": 0.91,
+  "reasoning": "用户明确在询问购买渠道"
+}
+
+Worker 创建 Reply 任务时，上述 result 被打包进 payload:
+INSERT agent_tasks(
+  task_type='reply',
+  payload='{
+    "classification": {...上面 Classify 的 result},
+    "comment_id": "uuid-xxx",
+    "context_budget": 4000
+  }'
+)
+```
+
+ReplyGenerateAgent 拿到 task 后，从 `task.payload.classification` 取分类结果，知道：
+- 这是一条 `purchase_intent` 的 question → 用 professional 风格回复
+- urgency=medium → 不用 rush，正常生成
+- key_points 告诉我们用户关心的具体点 → 回复要覆盖这些点
+
+**离线链路（定时触发）：**
+
+```
+每周定时 → InsightMiningAgent 取任务
+              │ payload: {time_range, platform, comment_batch}
+              │ result: {overall_sentiment, top_topics[], ugc_gold[], ...}
+              │
+              ▼
+          INSERT agent_tasks(type='content_strategy')
+              │ payload: {insight_report: {...上面 result}}
+              │
+              ▼
+          ContentStrategyAgent 取任务
+              │ result: {content_ideas[], community_actions[], risk_alerts[]}
+              │
+              ▼
+          前端 Dashboard 展示
+```
+
+**关键决策 — 为什么不用消息队列：**
+
+MVP 用 MySQL 的 `FOR UPDATE SKIP LOCKED` 轮询代替 RabbitMQ/Kafka。原因：
+- 单 Worker 场景下消息队列是重量级依赖
+- MySQL 已经是强依赖，复用做任务队列减少运维复杂度
+- 后期日均评论 > 500 条时再引入 Redis Stream 或 RabbitMQ
+
+**级联取消：**
+
+创作者手动标 spam → 级联取消该评论所有 pending 的下游任务：
+```sql
+UPDATE agent_tasks SET status='cancelled'
+WHERE comment_id = :id AND status = 'pending';
+```
+
+**防饥饿调度：**
+
+单 Worker 轮询时，80% 按优先级、20% 按等待时间，防止低优先级任务永久等待。
+
+#### 信息共享：三层模型
+
+Agent 不共享内存进程，所有共享信息通过存储层交换。按可见范围分三层：
+
+```
+第一层 — 全局共享（所有 Agent 都能读写）：
+  ├── comments 表（评论状态、分类结果 — Classify 写入，Reply 读取）
+  ├── reply_edit_log 表（编辑记录 — 所有 Agent 检索，ReplyCritic 写入）
+  ├── creator_tone/phrases/bio（创作者人设 — 所有 Agent 读取，人不时更新）
+  └── reply_drafts 表（草稿 — ReplyGenerate 写入，ReplyCritic 评价，前端展示）
+
+第二层 — 链路内传递（同一条评论的处理链内，上游→下游）：
+  ├── ClassifyRouter.result → 打包为 ReplyGenerate.payload
+  │     {category, intent, key_points, suggested_tone, confidence}
+  ├── ReplyGenerate.result → 打包为 ReplyCritic.payload
+  │     {drafts[], comment_content, creator_persona, context_used}
+  └── ReplyCritic.result.regeneration_hint → 回传到 ReplyGenerate（最多 1 次）
+       {failed_dimensions[], regeneration_hint}
+
+第三层 — Agent 私有（只在一个 Agent 的一次执行内可见）：
+  └── agent_tasks.payload.trace（工作记忆 — 该 Agent 的决策链）
+      [{step: "observe", ...}, {step: "plan", ...}, {step: "act", ...}]
+```
+
+**为什么不用全局黑板模式？** 每条评论的处理上下文（这条评论的 200 字正文 + 帖子摘要 + 用户历史）和别的评论没有关系，放全局黑板只会造成信息污染。只把"能被多条评论复用的信息"放在全局层（编辑过的回复模板、创作者人设），"仅本条评论需要的信息"放在链路内传递。
+
+#### 拓扑结构：Pipeline + 反馈环
+
+```
+实时链路（Pipeline + Feedback Loop）：
+
+  ClassifyRouter ──(异步)──→ ReplyGenerate ──(异步)──→ ReplyCritic
+       │                          │         ←──(异步)──      │
+       │                          └── 最多 1 次反馈重生成 ──┘ │
+       │                                                     │
+       ├── spam → 终止（不创建下游）                           │
+       └── neutral → 终止                                    │
+                                                             │
+离线链路（纯 Pipeline）：                                     │
+  InsightMining ──(异步)──→ ContentStrategy → 前端展示       │
+```
+
+拓扑设计的原则：
+- **异步解耦**：Agent 之间不直接调用。上游写完 `agent_tasks.result` 就结束，下游的 Worker 轮询到之后自己取。上游挂了不影响下游的 pending 任务。
+- **单向为主，单环例外**：唯一允许的反馈环是 ReplyCritic → ReplyGenerate（且最多 1 次）。不允许无限循环。
+- **没有 Fan-out**：一条评论的 Classify 只创建一个 Reply 任务，不会同时创建多个并行任务。并行会导致同一个评论的多套处理逻辑互相不可见。
+
+#### 冲突解决：Agent 意见不一致时谁说了算
+
+系统中唯一可能产生冲突的场景：ClassifyRouter 判 `needs_reply=true`，但 ReplyGenerate 拿到后判断"这条评论涉及敏感话题，不该回"。
+
+冲突解决链：
+
+```
+ClassifyRouter:  needs_reply=true
+      ↓
+ReplyGenerateAgent: 判断不该回 → 不生成草稿
+      ↓
+ReplyCriticAgent: 不参与（没有草稿可评价）
+      ↓
+最终：comment.status = 'pending_manual'，Dashboard 展示"AI 无法处理，请手动判断"
+      ↓
+创作者（人）做最终决定：回还是忽略
+```
+
+**核心原则：Agent 可以互相覆盖建议，但不能互相否定。** ReplyCritic 可以给 ReplyGenerate 提出修改建议（regeneration_hint），但不能说"你给我重做"。ReplyGenerate 可以拒绝 ClassifyRouter 的决定（不生成草稿），但不能说"你的分类是错的"。最终决策权始终在人的手里。
+
+#### 反馈闭环：短环和长环
+
+```
+短环（一次评论处理内，秒级）：
+  ReplyGenerate → ReplyCritic 评价 → needs_regeneration → ReplyGenerate 重生成
+  作用：单条回复的质量保证
+
+中环（每周，人工介入）：
+  reply_edit_log 分析 → 发现编辑模式 → 手动改 Prompt → 回复质量提升
+  作用：系统持续进化
+
+长环（2-3 个月，自动）：
+  is_adopted/is_edited 积累 → SFT 微调模型 → 替代 API
+  作用：降低成本 + 质量从根本上提升
+```
+
+三个闭环时间尺度不同、自动化程度不同。短环全自动，中环人工分析，长环自动训练。三个环都在跑的系统才算真正的"Ai-native"。
+
+#### 评论状态作为跨 Agent 的共享状态机
+
+`comments.status` 是所有 Agent 都能读写的全局状态：
+
+```
+pending → classified（ClassifyRouter 写入）
+        → replied（ReplyGenerate 生成草稿 + 创作者发送后）
+        → ignored（创作者手动忽略）
+        → spam（ClassifyRouter 或创作者手动标记）
+        → pending_manual（任何 Agent 判断"我搞不定"）
+```
+
+每个 Agent 只负责状态机的一段，不会互相覆盖。ClassifyRouter 写 `classified`，ReplyGenerate 不写 status（它只写 reply_drafts），创作者的操作触发 `replied`/`ignored`/`spam`。
+
 ### 4.1 ClassifyRouterAgent
 
 **模型选择：** 轻量模型（分类任务不需要强推理，用小模型即可）。后期微调 0.5B 小模型替代 API，几乎免费。

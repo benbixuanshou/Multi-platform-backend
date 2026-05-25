@@ -55,7 +55,9 @@ open http://localhost:8000/docs                        # Swagger UI
 
 ## 核心架构
 
-### 5 个 Agent 的协作链路
+### 5 个 Agent 的协作链路（混合范式）
+
+Agent 采用混合范式：基座是 **ReAct**（带 verify 增强），核心亮点是 **Reflection**（Generator→Critic→Generator 循环），编排层用 **Routing**，离线分析用 **Plan-and-Execute**。详见 [golden-seeking-lobster.md §4.0](golden-seeking-lobster.md)。
 
 ```
 实时链路：

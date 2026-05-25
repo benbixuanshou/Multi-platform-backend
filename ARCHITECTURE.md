@@ -87,6 +87,17 @@
         └──────┘  └───────┘  └────────┘
 ```
 
+## 多 Agent 编排
+
+Agent 之间**不直接调用**，通过 `agent_tasks` 表解耦。信息传递载体是 `payload`（输入）和 `result`（输出）。ClassifyRouter 的 result 自动打包为 ReplyGenerate 的 payload。
+
+关键机制：
+- **级联取消**：评论标 spam → 取消所有下游 pending 任务
+- **防饥饿调度**：80% 按优先级 + 20% 按等待时间
+- **检查点恢复**：`processing_checkpoint` 状态 → Worker 崩溃后从 verify 恢复，不重复调 LLM
+
+---
+
 ## 数据流向（一条评论的完整旅程）
 
 ```
