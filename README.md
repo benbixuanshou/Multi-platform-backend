@@ -131,6 +131,7 @@ cd frontend && npm install && npm run dev
 │   └── migrations/  MySQL DDL + Milvus 脚本
 ├── frontend/        Next.js Dashboard
 ├── extension/       Plasmo 浏览器扩展
+├── .claude/skills/   Claude Code 开发工作流 Skill（prompt审查/migration审查/组件生成）
 └── docs/            设计文档（见下方链接）
 ```
 

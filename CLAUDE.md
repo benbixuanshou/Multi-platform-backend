@@ -13,6 +13,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **当前状态：设计阶段完成，环境就绪，下一步 Phase 0 — `docker compose up -d`。**
 
+### Skills
+
+项目 `.claude/skills/` 下有 3 个开发工作流 Skill，Claude Code 自动按需加载：
+- `agent-prompt-review` — 审查 Agent System Prompt 的完整性和规范性
+- `migration-review` — 审查 MySQL DDL 是否符合项目 Schema 规范
+- `harness-component-generator` — 按项目接口规范生成新 Hook/Provider/Tool
+
 ## 技术栈
 
 FastAPI / Next.js 14 / MySQL 8.0 / Redis 7 / Milvus 2.5 / Docker Compose / DeepSeek API
