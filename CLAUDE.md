@@ -114,11 +114,16 @@
 - 10 个 Harness 模块深度设计（上下文管理 → 人机协作）
 - API Schema（27 个端点）
 - 技术选型（FastAPI / Next.js / MySQL / Redis / Milvus / 无 LangChain）
-- 四人分工 + 三周冲刺计划
+- 单人开发策略 + 6 Phase 开发计划
 - 模型演进策略（SFT → DPO）
 - 测试策略 + 风险应对 + 成本估算
 
 **下一步：开始写代码。**
+
+### 配套文档
+- [golden-seeking-lobster.md](golden-seeking-lobster.md) — 完整技术方案（十四章节）
+- [ARCHITECTURE.md](ARCHITECTURE.md) — 系统架构全景图
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — 分阶段开发计划（Phase 0-8，每 Phase 独立测试）
 
 ---
 

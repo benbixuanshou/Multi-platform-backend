@@ -1,10 +1,10 @@
 # 多 Agent 评论管理平台 — 完整技术方案
 
 ## 团队条件
-- 四人全栈工程师，每人可覆盖前后端 + 基础设施
+- 一人全栈，覆盖前后端 + 基础设施 + Agent 引擎
 - 有浏览器扩展开发经验
 - 有 LLM API 实际调用经验
-- 高强度投入
+- 预计投入：日均 3-4 小时（个人项目节奏，不设硬死线）
 
 ---
 
@@ -1856,199 +1856,88 @@ Agent 做排序和建议，人做决策和确认。
 
 ---
 
-## 七、四人分工（细化版）
+## 七、单人开发策略
 
-### Person A — Agent 引擎（最核心，最重）
+按**依赖关系**而非"多人并行"来决定开发顺序。
 
-**交付物：**
-- `BaseAgent` 抽象类（编排层，职责：Agent Loop 模板方法 + HookPipeline 集成）
-- **核心组件**（委托给 BaseAgent，非继承）：
-  - `AgentRunner` — 编排层，observe→plan→act→verify→output 模板方法
-  - `ContextBuilder` — 上下文组装 + 预算检查 + 分级压缩
-  - `HookPipeline` — pre_model / post_model / pre_tool / post_tool / on_error 五阶段钩子
-  - `ToolRegistry` — 工具注册表 + 超时 + fallback
-  - `ModelProvider` — 可替换模型抽象（DeepSeek / Claude / 本地）
-  - `CircuitBreaker` — 窗口熔断器
-  - `TraceRecorder` — 工作记忆 trace 记录
-- 5 个 Agent 实现（仅保留 Agent 特有逻辑：build_prompt + parse_response）
-- Agent Worker 主循环（`while True: poll_tasks() → process() → mark_done()`）
-- 5 个 System Prompt 的 `.md` 文件
-- Prompt 效果评测脚本（拿 100 条真实评论跑 → 人工打分 → 迭代）
-- `agent_tasks` 表 + `agent_logs` 表的管理逻辑
-- Agent 间任务串联逻辑（classify 完成后自动创建 reply 任务）
-
-**ModelProvider 接口设计（关键抽象）：**
+### 开发顺序（依赖从底向上）
 
 ```
-Agent 逻辑（Prompt 模板 + 编排）
-        │
-        ▼
-   ModelProvider 接口  ←── 改配置切模型，不动 Agent 代码
-        │
-   ┌────┼────┬──────────┐
-   ▼    ▼    ▼          ▼
-DeepSeek Claude Qwen   本地 SFT 模型
+Phase 1 — 基础设施（先跑通底层）
+  ├── Docker Compose 启动 MySQL + Redis + Milvus
+  ├── DB migration（9 张表）+ Alembic 初始化
+  ├── Milvus Collection 创建
+  └── .env 配置 + 环境变量注入
+
+Phase 2 — 后端核心（API + Agent 引擎）
+  ├── FastAPI 项目启动 + JWT auth
+  ├── 9 个 API route 模块逐个实现
+  ├── Harness 组件（HookPipeline / ModelProvider / CircuitBreaker 等）
+  ├── PlatformAdapter 接口 + XhsAdapter 实现（先只做小红书）
+  ├── ClassifyRouterAgent（第一个 Agent，跑通全链路）
+  └── ReplyGenerateAgent（第二个 Agent）
+
+Phase 3 — 前端 Dashboard
+  ├── Next.js 项目启动 + Tailwind + TanStack Query
+  ├── CommentFeed + CommentCard（含虚拟滚动）
+  ├── ReplyDraftPanel（草稿查看/编辑/发送）
+  ├── FilterSidebar + 搜索
+  └── Dashboard 数据概览
+
+Phase 4 — 浏览器扩展
+  ├── Plasmo 骨架 + content script 注入
+  ├── 小红书 DOM 解析器
+  └── 批量上报 + Cookie 同步
+
+Phase 5 — 第二/三平台
+  ├── DouyinAdapter + 抖音 DOM 解析器
+  └── BilibiliAdapter + B站 DOM 解析器
+
+Phase 6 — 差异化功能
+  ├── InsightMiningAgent + 数据看板页面
+  ├── 批量操作 + 回复效果追踪
+  └── 部署上线（VPS + Docker Compose）
 ```
 
-```python
-class ModelProvider(ABC):
-    """模型提供者抽象 — Agent 不关心底层是哪个模型"""
-    
-    @abstractmethod
-    async def chat(self, messages: list[dict], **kwargs) -> ModelResponse:
-        ...
-    
-    @abstractmethod
-    def count_tokens(self, messages: list[dict]) -> int:
-        ...
+### 所有交付物清单（合并 Person A/B/C/D 全部职责）
 
-class DeepSeekProvider(ModelProvider):
-    """DeepSeek API 适配"""
-    ...
-
-class ClaudeProvider(ModelProvider):
-    """Claude API 适配"""
-    ...
-
-class LocalModelProvider(ModelProvider):
-    """vLLM / Ollama 本地推理适配"""
-    ...
-```
-
-模型选择通过配置驱动：
-
-```json
-{
-  "classify_router": {
-    "provider": "deepseek",
-    "model": "deepseek-v4-pro",
-    "fallback": "qwen2.5-0.5b-local"
-  },
-  "reply_generate": {
-    "provider": "deepseek",
-    "model": "deepseek-v4-pro",
-    "fallback": "deepseek-v3"
-  }
-}
-```
-
-**技术要点：**
-- 需要设计好的重试策略（LLM 调用偶尔超时/限流）
-- 需要给每个 Agent 写 rate limiter（控制 API 费用）
-- 需要设计退化策略（LLM 挂了怎么办？→ 降级到规则引擎）
-- **ModelProvider 设计要点**：每个 Provider 封装不同模型的 API 差异（DeepSeek / Claude / 本地模型），通过配置切换。同一 Agent 可同时配置多个 Provider（主 + fallback），主模型失败时自动降级
-
-### Person B — 平台接入 + 浏览器扩展
-
-**交付物：**
-- `PlatformAdapter` 接口定义
-- `XhsAdapter` 实现 + `DouyinAdapter` + `BilibiliAdapter`
-- 浏览器扩展（Plasmo）：content script + background + popup + 小红书/抖音/B站三个平台的 DOM 解析器
-- Playwright 定时任务（**MVP 不做**，后期补做兜底通道）
-- Cookie 同步机制（扩展 ↔ 后端，加密传输）
-- 评论标准化 + 去重逻辑
-- 官方 API 调研文档（小红书/抖音/B站 API 申请条件）
-
-**技术要点：**
-- 小红书 Web 版 DOM 结构反工程（花最多时间的地方）
-- MutationObserver + IntersectionObserver 的配合
-- Cookie 安全传输（扩展端用 crypto.subtle 加密 → 后端解密存储）
-- 扩展的防抖和批量上报（不能每条评论发一次 HTTP）
-
-### Person C — 后端 + 基础设施
-
-**交付物：**
-- FastAPI 项目结构（routes, services, models, schemas）
-- 完整数据库 schema + Alembic 迁移
-- API 接口：
-  - `POST /api/auth/login` — 邮箱注册登录
-  - `GET /api/comments` — 评论列表（分页+筛选）
-  - `GET /api/comments/:id` — 单条评论详情
-  - `POST /api/comments/:id/reply` — 发送回复
-  - `POST /api/internal/comments/batch` — 扩展批量上报
-  - `GET /api/events` — 数据推送（MVP 用轮询替代，后期改 SSE）
-  - `GET /api/analytics/*` — 数据看板接口
-- JWT 认证中间件
-- Redis 缓存层（热点数据、限流）
-- Docker Compose 编排（4 个 service：api, worker, frontend, db）
-- GitHub Actions CI/CD（push → lint → test → build image → deploy）
-- Caddy 反向代理配置
-
-### Person D — 前端
-
-**交付物：**
-- Next.js 14 App Router 项目结构
-- 页面：
-  - `/login` — 登录页
-  - `/dashboard` — 评论管理主页（核心页面）
-  - `/analytics` — 数据看板
-  - `/settings` — 设置页（人设配置、平台绑定）
-  - `/onboarding` — 新用户引导
-- 组件：
-  - CommentCard — 评论卡片
-  - CommentFeed — 评论流（虚拟滚动，处理大量评论）
-  - ReplyDraftPanel — AI 草稿展示 + 编辑 + 发送
-  - FilterSidebar — 筛选侧栏
-  - StatsOverview — 数据概览卡片
-  - TrendChart — 趋势图表
-- 轮询客户端（MVP 用前端轮询替代 SSE，后期切换）
-- TanStack Query 集成（自动轮询 + 缓存）
-- 响应式适配（桌面端优先，移动端可查看）
+| 层 | 交付物 |
+|---|---|
+| Agent 引擎 | BaseAgent + 7 个 Harness 组件 + 3 个 Agent（Classify/Reply/Insight）+ 3 套 System Prompt + Worker 主循环 + eval 脚本 |
+| 平台接入 | PlatformAdapter 接口 + 3 个 Adapter + 浏览器扩展（3 平台 DOM 解析）+ Cookie 加密传输 + 去重逻辑 |
+| 后端 | FastAPI 项目 + 9 个 route 模块 + MySQL/Redis/Milvus 连接层 + JWT auth + Alembic migration |
+| 前端 | Next.js 项目 + 5 页面 + 6 核心组件 + TanStack Query 轮询层 + 响应式适配 |
+| 基础设施 | Docker Compose（6 service）+ GitHub Actions CI/CD + Caddy 反向代理 + Sentry 监控 |
 
 ---
 
-## 八、接口边界约定（四人协作的关键）
+## 八、接口边界约定
 
-定义清楚接口，四个人就能并行工作。
+虽然是一人开发，保持接口边界可以让各层独立开发、独立测试。
 
-### A ↔ C（Agent 引擎 ↔ 后端）
+### Agent ↔ 后端
 
-```
-Agent Worker 需要：
-  - DB 直连（读 agent_tasks，写 result 和 agent_logs）
-  - DB 直连（读 comments 获取评论内容）
-  - DB 直连（写 reply_drafts）
+Agent Worker 直连 MySQL/Redis/Milvus，不通过 HTTP API。Worker 是独立进程，Docker Compose 里单独一个 service。
 
-不需要通过 HTTP API，直接操作同一数据库。
-Worker 是独立进程，Docker Compose 里单独一个 service。
-```
-
-### B ↔ C（平台接入 ↔ 后端）
+### 浏览器扩展 ↔ 后端
 
 ```
-浏览器扩展 → POST /api/internal/comments/batch
-  Headers: Authorization: Bearer {api_key}  (不是用户 JWT，是扩展专用 key)
-  Body: {
-    "platform": "xhs",
-    "comments": [RawComment, RawComment, ...]
-  }
+扩展 → POST /api/internal/comments/batch
+  Headers: Authorization: Bearer {extension_api_key}
+  Body: { "platform": "xhs", "comments": [RawComment, ...] }
   Response: { "received": 15, "new": 12, "duplicates": 3 }
 
-Playwright 定时任务 → 同样的接口
-  定时任务运行在 Worker 容器里，调同一个内部 API
+Cookie 同步 → POST /api/internal/cookie
+  扩展端 crypto.subtle 加密传输，后端 AES-256-GCM 加密存储
 ```
 
-### C ↔ D（后端 ↔ 前端）
+### 前端 ↔ 后端
 
-```
-标准 REST + OpenAPI 文档（MVP 用前端轮询替代 SSE）。
-FastAPI 自动生成 /docs，前端对着文档开发。
-Person C 先定义 Schema → Person D 立即开始写页面（可以先 mock 数据）。
-```
+标准 REST。FastAPI 自动生成 `/docs`（OpenAPI），前端对文档开发。先定义 Pydantic Schema → 前端立即开始写页面（可先 mock 数据）。
 
-### D ↔ C（前端 ↔ 后端）
+### Agent ↔ 前端
 
-```
-标准 REST + OpenAPI 文档。MVP 用前端轮询（每秒），后期切 SSE。
-FastAPI 自动生成 /docs，前端对着文档开发。
-Person C 先定义 Schema → Person D 立即开始写页面（可以先 mock 数据）。
-```
-
-### A ↔ D（Agent 引擎 ↔ 前端）
-
-```
-没有直接通信。A 写 reply_drafts 表 → C 提供 GET /api/comments/:id 接口 → D 展示草稿。
-```
+没有直接通信。Agent 写 reply_drafts 表 → 后端 API 提供数据 → 前端轮询展示。
 
 ---
 
@@ -2148,40 +2037,90 @@ Dashboard：GET /api/comments + GET /api/analytics/overview，30s 间隔
 
 ---
 
-## 十、MVP 三周冲刺计划
+## 十、MVP 开发计划（单人，按 Phase 推进）
 
-### Week 1：骨架
+不设硬死线，按依赖关系推进。每 Phase 有明确检验标准。
 
-| 人 | 目标 |
-|---|---|
-| A | BaseAgent 骨架（AgentRunner + ModelProvider + ContextBuilder）+ ClassifyRouterAgent跑通（输入评论→输出分类JSON，暂不做 hooks，硬编码检查） |
-| B | 浏览器扩展骨架 + 小红书 DOM 选择器验证（console 里能打印出评论内容） |
-| C | FastAPI 项目结构 + DB schema + Alembic migration + `/api/internal/comments/batch` 接口 |
-| D | Next.js 项目 + Dashboard 骨架 + CommentCard 组件（用 mock 数据） |
+### Phase 1：基础设施 + 后端骨架（预计 1-2 周）
 
-**Week 1 检验标准：** B 从浏览器抓到评论 → POST 给 C → 写入 DB → D 刷新页面能看到
+```
+□ Docker Compose 一键启动 MySQL + Redis + Milvus
+□ DB migration 执行通过（9 张表创建）
+□ Milvus 3 个 Collection 创建通过
+□ FastAPI 项目启动 + /docs 可访问
+□ JWT auth（register/login/refresh/logout）4 个接口可用
+□ GET /api/comments + GET /api/comments/:id 接口可用（返回 mock/空数据）
+□ POST /api/internal/comments/batch 可用（扩展上报入口）
+```
 
-### Week 2：闭环
+**检验：** curl 调 `/api/auth/register` → 拿 token → 调 `/api/comments` → 返回 200
 
-| 人 | 目标 |
-|---|---|
-| A | ReplyGenerateAgent 完成；HookPipeline（SafetyCheckHook+SchemaValidationHook）；Worker 主循环+classify→reply 串联 |
-| B | 扩展批量上报 + 去重完成；Playwright 模式备份完成 |
-| C | 全部 REST API + JWT auth + Docker Compose 本地一键启动 |
-| D | Dashboard 完整交互（筛选、评论详情、AI 草稿展示、采用/编辑/发送） |
+### Phase 2：Agent 引擎（预计 2-3 周）
 
-**Week 2 检验标准：** 新评论自动分类 → AI 生成回复草稿 → 前端展示 → 用户点"发送" → 回复出现在小红书
+```
+□ ModelProvider 实现（DeepSeek API 适配）
+□ HookPipeline + 2 个 Hook（SafetyCheck + SchemaValidation）
+□ ContextBuilder 基础版（暂不做压缩）
+□ AgentRunner 模板方法 + Worker 主循环
+□ CircuitBreaker + TraceRecorder
+□ ClassifyRouterAgent 跑通（含 eval set 100 条验证）
+□ ReplyGenerateAgent 跑通（含 intent 驱动回复策略）
+□ Classify → Reply 任务串联
+□ agent_tasks 表轮询 + 状态流转正常
+```
 
-### Week 3：打磨
+**检验：** 手动插一条评论 → Worker 自动拉取 → 分类完成 → 草稿生成 → reply_drafts 表有 3 条记录
 
-| 人 | 目标 |
-|---|---|
-| A | InsightMiningAgent 完成；ToolRegistry + CircuitBreaker + 其余 Hook；Prompt 效果对比脚本 |
-| B | 扩展稳定性（重连、错误处理、Cookie 过期提醒） |
-| C | VPS 部署 + GitHub Actions + Sentry + 监控 |
-| D | 数据看板页面 + 设置页 + 找到 3-5 个真实创作者内测 |
+### Phase 3：前端 Dashboard（预计 2 周）
 
-**Week 3 检验标准：** 真实创作者每天打开使用，反馈循环建立
+```
+□ Next.js 项目启动 + Tailwind + TanStack Query
+□ CommentFeed（虚拟滚动） + CommentCard
+□ ReplyDraftPanel（查看/编辑/发送）
+□ FilterSidebar（平台/状态/分类/紧急度筛选项）
+□ 评论搜索（关键词）
+□ Dashboard 数据概览（今日新增/待回复/回复率/采纳率）
+□ 轮询策略（30s Dashboard / 5s 草稿生成中）
+```
+
+**检验：** 打开 Dashboard → 看到评论列表 → 点开一条 → 看到 3 个 AI 草稿 → 选一个编辑 → 点发送
+
+### Phase 4：浏览器扩展（预计 2 周）
+
+```
+□ Plasmo 骨架搭建
+□ Content script 注入小红书 + MutationObserver 监听
+□ 小红书评论区 DOM 解析 → RawComment
+□ Background service worker 消息转发
+□ 批量聚合（1 秒缓冲）+ 去重（内存 Map 500 条）
+□ POST /api/internal/comments/batch 对接
+□ Cookie 检测 + 加密同步
+□ Popup 展示同步状态 + 今日评论数
+```
+
+**检验：** 打开小红书帖子 → 扩展自动抓取评论 → 后端入库 → Dashboard 看到新评论
+
+### Phase 5：第二/三平台（预计 1-2 周）
+
+```
+□ DouyinAdapter + 抖音 DOM 解析器
+□ BilibiliAdapter + B站 DOM 解析器
+□ 扩展补充抖音/B站 content script
+□ 平台适配回归测试（三个平台各自拉 20 条评论验证）
+```
+
+### Phase 6：差异化功能 + 部署（预计 2-3 周）
+
+```
+□ InsightMiningAgent + 数据看板页面
+□ 批量操作（生成/发送）
+□ 回复效果追踪（reply_performance 定时任务）
+□ VPS 部署（Docker Compose + Caddy + Sentry）
+□ GitHub Actions CI/CD
+□ 同学内测 + 反馈收集
+```
+
+**总计预估：** 10-14 周（日均 3-4 小时），不设硬死线。
 
 ---
 
