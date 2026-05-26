@@ -29,7 +29,7 @@ FastAPI / Next.js 14 / MySQL 8.0 / Redis 7 / Milvus 2.5 / Docker Compose / DeepS
 
 ```bash
 # 环境启动
-docker compose up -d mysql redis milvus etcd          # 启动存储层
+docker compose up -d mysql redis milvus etcd minio     # 启动存储层
 docker compose up -d                                   # 启动全部 6 个 service
 docker compose down                                    # 停止
 
