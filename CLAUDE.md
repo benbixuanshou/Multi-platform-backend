@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 [ARCHITECTURE.md](ARCHITECTURE.md) — 系统架构全景图
 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — 8 Phase 开发计划（每 Phase 独立测试门）
 
-**当前状态：设计阶段完成，环境就绪，下一步 Phase 0 — `docker compose up -d`。**
+**当前状态：Phase 0 完成（MySQL/Redis/Milvus 全部 healthy），下一步 Phase 1 — FastAPI 骨架 + JWT 认证。**
 
 ### Skills
 
