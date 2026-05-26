@@ -18,9 +18,12 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    salt_hex, key_hex = hashed.split(":")
-    salt = bytes.fromhex(salt_hex)
-    key = bytes.fromhex(key_hex)
+    try:
+        salt_hex, key_hex = hashed.split(":")
+        salt = bytes.fromhex(salt_hex)
+        key = bytes.fromhex(key_hex)
+    except (ValueError, AttributeError):
+        return False
     new_key = pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
     return key == new_key
 

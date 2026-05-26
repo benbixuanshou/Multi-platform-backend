@@ -15,10 +15,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Skills
 
-项目 `.claude/skills/` 下有 3 个开发工作流 Skill，Claude Code 自动按需加载：
+项目 `.claude/skills/` 下有 4 个开发工作流 Skill，Claude Code 自动按需加载：
 - `agent-prompt-review` — 审查 Agent System Prompt 的完整性和规范性
 - `migration-review` — 审查 MySQL DDL 是否符合项目 Schema 规范
 - `harness-component-generator` — 按项目接口规范生成新 Hook/Provider/Tool
+- `code-review` — 提交前审查代码（安全/正确性/项目规范/API 设计/测试）
 
 ## 技术栈
 
