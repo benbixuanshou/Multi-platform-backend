@@ -150,8 +150,8 @@ cd frontend && npm install && npm run dev
 | Phase | 内容 | 状态 |
 |---|---|---|
 | 0 | 环境搭建 + 数据库初始化 | ✅ 完成 |
-| 1 | FastAPI 骨架 + JWT 认证 | 🚧 下一步 |
-| 2 | Harness 组件（AgentRunner/HookPipeline 等） | ⬜ |
+| 1 | FastAPI 骨架 + JWT 认证 | ✅ 完成 |
+| 2 | Harness 组件（AgentRunner/HookPipeline 等） | 🚧 下一步 |
 | 3 | ClassifyRouterAgent + eval set 验证 | ⬜ |
 | 4 | ReplyGenerateAgent + ReplyCriticAgent | ⬜ |
 | 5 | Worker 主循环 + 全链路联调 | ⬜ |
