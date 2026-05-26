@@ -59,8 +59,12 @@ result = test("login", "POST", "/api/auth/login",
 test("login bad pw", "POST", "/api/auth/login",
      body={"email": email, "password": "wrong"}, want_status=401)
 
+test("weak password rejected", "POST", "/api/auth/register",
+     body={"email": "weak@test.com", "password": "a"},
+     want_status=422)
+
 test("duplicate register", "POST", "/api/auth/register",
-     body={"email": email, "password": "x", "display_name": "Dup"},
+     body={"email": email, "password": "duplicate123", "display_name": "Dup"},
      want_status=409)
 
 token = result["access_token"] if result else None
